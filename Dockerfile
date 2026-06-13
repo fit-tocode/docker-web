@@ -1,7 +1,6 @@
 FROM --platform=linux/amd64 ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── Desktop + VNC + noVNC ─────────────────────────────────────────────────────
 RUN apt-get update && apt-get install --no-install-recommends -y \
     xfce4 \
     xfce4-goodies \
@@ -25,7 +24,6 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Firefox via Mozilla PPA ───────────────────────────────────────────────────
 RUN add-apt-repository ppa:mozillateam/ppa -y && \
     echo 'Package: *' > /etc/apt/preferences.d/mozilla-firefox && \
     echo 'Pin: release o=LP-PPA-mozillateam' >> /etc/apt/preferences.d/mozilla-firefox && \
@@ -35,7 +33,6 @@ RUN add-apt-repository ppa:mozillateam/ppa -y && \
     apt-get update -y && apt-get install -y firefox xubuntu-icon-theme \
     && rm -rf /var/lib/apt/lists/*
 
-# ── VNC setup ─────────────────────────────────────────────────────────────────
 RUN mkdir -p /root/.vnc && \
     touch /root/.Xauthority && \
     printf '#!/bin/bash\nexec startxfce4\n' > /root/.vnc/xstartup && \
@@ -44,37 +41,32 @@ RUN mkdir -p /root/.vnc && \
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 RUN cat > /start.sh << 'SCRIPT'
 #!/bin/bash
-set -e
 
-# Clean up stale locks
 rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 
-# Start VNC on display :1 (port 5901)
+mkdir -p /root/.vnc
+vncpasswd -f <<< $'password\npassword' > /root/.vnc/passwd 2>/dev/null || true
+chmod 600 /root/.vnc/passwd
+
 vncserver :1 \
     -localhost no \
     -SecurityTypes None \
     -geometry 1280x768 \
     -depth 24 \
-    --I-KNOW-THIS-IS-INSECURE
+    --I-KNOW-THIS-IS-INSECURE || true
 
-# Self-signed cert for websockify SSL
-openssl req -new -subj "/C=JP" -x509 -days 365 -nodes \
-    -out /self.pem -keyout /self.pem 2>/dev/null
+sleep 2
 
-# Railway injects $PORT — MUST bind to this port
 LISTEN_PORT="${PORT:-6080}"
-echo "[start] websockify binding to 0.0.0.0:${LISTEN_PORT}"
+echo "[start] websockify binding to 0.0.0.0:${LISTEN_PORT} -> localhost:5901"
 
-# Run websockify in FOREGROUND (keeps container alive)
 exec websockify \
     --web=/usr/share/novnc/ \
-    --cert=/self.pem \
     --heartbeat=30 \
     0.0.0.0:${LISTEN_PORT} \
     localhost:5901
 SCRIPT
+
 RUN chmod +x /start.sh
-
 EXPOSE 6080
-
 CMD ["/start.sh"]
